@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="am">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>FASIL VIP BINGO</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        :root { --gold: #bf953f; --bright-gold: #fcf6ba; --red: #ff3333; }
+        body { font-family: sans-serif; background: #000; color: var(--gold); text-align: center; margin: 0; padding: 0; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+        #statusOverlay { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 100002; display: none; justify-content: center; align-items: center; font-size: 55px; font-weight: bold; color: var(--bright-gold); }
+        #appContent { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+        .page { display: none; flex: 1; padding: 10px; overflow-y: auto; padding-bottom: 90px; }
+        .page.active { display: flex; flex-direction: column; }
+        .tabs { display: flex; background: #111; border-top: 2px solid var(--gold); position: fixed; bottom: 0; width: 100%; height: 75px; z-index: 1000; } 
+        .tab-btn { flex: 1; color: #777; border: none; background: none; font-weight: bold; font-size: 14px; }
+        .tab-btn.active { color: #fff; border-top: 4px solid var(--gold); background: #1a1a1a; }
+        .grid-container { display: grid; grid-template-columns: repeat(10, 1fr); gap: 2.5px; background: #151515; padding: 5px; border-radius: 8px; margin: 5px 0; }
+        .grid-cell { background: #0a0a0a; font-size: 10px; font-weight: bold; padding: 6px 0; border: 1px solid #222; border-radius: 3px; }
+        .winner-hit { background: var(--red) !important; color: #fff !important; animation: pulse 0.8s infinite; }
+        @keyframes pulse { 50% { transform: scale(1.2); } }
+        canvas { border: 4px solid var(--gold); border-radius: 50%; background: #050505; width: 130px; height: 130px; margin: 5px auto; }
+        button#drawBtn { width: 95%; padding: 15px; border-radius: 15px; font-size: 19px; background: var(--gold); font-weight: bold; border: none; margin: 5px auto; }
+        .admin-only.viewer-hide { display: none !important; }
+    </style>
+</head>
+<body onload="initApp()">
+
+    <div id="statusOverlay">READY</div>
+
+    <div id="appContent">
+        <div id="gamePage" class="page active">
+            <h2 style="margin-top:40px;">🎰 FASIL VIP LIVE</h2>
+            <div id="gameGrid" class="grid-container"></div>
+            <div style="display:flex; justify-content: space-around; margin: 10px 0;">
+                <div style="background:#111; padding:10px; border:1px solid var(--gold); border-radius:10px;">1ኛ: <b id="v1">?</b></div>
+                <div style="background:#111; padding:10px; border:1px solid var(--gold); border-radius:10px;">2ኛ: <b id="v2">?</b></div>
+                <div style="background:#111; padding:10px; border:1px solid var(--gold); border-radius:10px;">3ኛ: <b id="v3">?</b></div>
+            </div>
+            <canvas id="bingoCanvas" width="200" height="200"></canvas>
+            <button id="drawBtn" class="admin-only" onclick="startDraw()">START DRAW</button>
+        </div>
+
+        <div id="setupPage" class="page">
+            <h3>⚙️ SETUP</h3>
+            <input type="text" id="botToken" placeholder="Bot Token" style="width:90%; padding:10px; margin:5px;"><br>
+            <input type="text" id="chatId" placeholder="Chat ID" style="width:90%; padding:10px; margin:5px;"><br>
+            <button onclick="saveSetup()" style="padding:15px; width:90%; background:var(--gold);">SAVE</button>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" onclick="showPage('gamePage')">🎰 ዕጣ</button>
+            <button id="setupTab" class="tab-btn" onclick="showPage('setupPage')">⚙️ SETUP</button>
+        </div>
+    </div>
+
+    <script>
+        const SB_URL = "https://hpdhhomunbpcluuhmila.supabase.co";
+        const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZGhob211bmJwY2x1dWhtaWxhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNDM2MDcsImV4cCI6MjA4ODgxOTYwN30.EIDhhsFaR6Qw5VVobmQs5JYlbJaDBjxWf_F7kM-jEn0";
+        const supabaseClient = supabase.createClient(SB_URL, SB_KEY);
+        const isViewer = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData !== "";
+
+        function initApp() {
+            document.getElementById('appContent').style.display = 'flex';
+            if(isViewer) {
+                document.getElementById('drawBtn').classList.add('viewer-hide');
+                document.getElementById('setupTab').style.display = 'none';
+            }
+            createGrid();
+            listenToLive();
+        }
+
+        function createGrid() {
+            const gg = document.getElementById('gameGrid');
+            for(let i=1; i<=100; i++) {
+                let d = document.createElement('div'); d.className = 'grid-cell'; d.id = 'g'+i; d.innerText = i;
+                gg.appendChild(d);
+            }
+        }
+
+        function listenToLive() {
+            supabaseClient.channel('bingo_live').on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bingo_live' }, payload => {
+                if(isViewer) animateWinners(payload.new.current_nums);
+            }).subscribe();
+        }
+
+        async function startDraw() {
+            let winners = [];
+            while(winners.length < 3) { let r = Math.floor(Math.random()*100)+1; if(!winners.includes(r)) winners.push(r); }
+            await supabaseClient.from('bingo_live').update({ current_nums: winners }).eq('id', 1);
+            animateWinners(winners);
+        }
+
+        async function animateWinners(w) {
+            document.querySelectorAll('.grid-cell').forEach(el => el.classList.remove('winner-hit'));
+            for(let i=0; i<3; i++) {
+                document.getElementById('v'+(i+1)).innerText = w[i];
+                document.getElementById('g'+w[i]).classList.add('winner-hit');
+                drawBall(w[i]);
+                await new Promise(r => setTimeout(r, 1500));
+            }
+        }
+
+        function drawBall(num) {
+            const cx = document.getElementById('bingoCanvas').getContext('2d');
+            cx.clearRect(0,0,200,200);
+            cx.beginPath(); cx.arc(100,100,80,0,Math.PI*2); cx.fillStyle="#bf953f"; cx.fill();
+            cx.fillStyle="#000"; cx.font="bold 60px Arial"; cx.textAlign="center"; cx.fillText(num, 100, 120);
+        }
+
+        function showPage(id) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+        }
+
+        function saveSetup() {
+            localStorage.setItem('f_token', document.getElementById('botToken').value);
+            localStorage.setItem('f_chat', document.getElementById('chatId').value);
+            alert("Saved!");
+        }
+    </script>
+</body>
+</html>
